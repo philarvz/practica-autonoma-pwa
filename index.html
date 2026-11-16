@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Outbox PWA</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <meta name="theme-color" content="#0d6efd">
+    <link rel="icon" href="./icons/icon-192.png">
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+    <header class="topbar">
+        <h1>Bandeja de salida offline</h1>
+        <div class="estado">
+            <span id="estado-red" class="pill">...</span>
+            <span id="estado-sync" class="pill pill-info">Sync: --</span>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="card">
+            <h2>Nuevo mensaje</h2>
+            <form id="form-mensaje">
+                <label>
+                    Nombre
+                    <input type="text" id="nombre" required maxlength="40" placeholder="Tu nombre">
+                </label>
+                <label>
+                    Mensaje
+                    <textarea id="mensaje" required maxlength="200" placeholder="Escribe algo..."></textarea>
+                </label>
+                <button type="submit" class="btn btn-primary">Enviar</button>
+            </form>
+            <p id="feedback" class="feedback"></p>
+        </section>
+
+        <section class="card">
+            <div class="row-between">
+                <h2>Pendientes en cola</h2>
+                <div class="acciones">
+                    <button id="btn-sync" class="btn">Sincronizar ahora</button>
+                    <button id="btn-purgar" class="btn btn-danger">Purgar todo</button>
+                </div>
+            </div>
+            <ul id="lista-pendientes" class="lista"></ul>
+            <p id="vacio" class="muted">No hay registros en la cola.</p>
+        </section>
+
+        <section class="card">
+            <h2>Historial sincronizado</h2>
+            <ul id="lista-sincronizados" class="lista"></ul>
+            <p id="vacio-sinc" class="muted">Aún no se ha sincronizado nada.</p>
+        </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="./db-helper.js"></script>
+    <script src="./app.js"></script>
+</body>
+</html>
