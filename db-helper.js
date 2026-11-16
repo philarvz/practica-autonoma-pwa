@@ -97,7 +97,7 @@ function clearAll() {
     })
 }
 
-window.DBHelper = {
+self.DBHelper = {
     openDB: openDB,
     add: add,
     getAll: getAll,
