@@ -1,8 +1,8 @@
-# Outbox PWA
+# PWA Outbox
 
 Práctica autónoma — Temas 5.1, 5.2 y 5.3.
 
-Aplicación PWA que captura envíos `POST` sin conexión, los encola en IndexedDB y los sincroniza en segundo plano con la Background Sync API. Vanilla JS, sin librerías y sin `async/await`.
+Aplicación PWA que registra incidencias en campo, encola los envíos fallidos en IndexedDB y los sincroniza en segundo plano con la Background Sync API. JavaScript Vanilla, sin librerías externas y sin `async/await`.
 
 ## Enlaces
 
@@ -13,59 +13,58 @@ Aplicación PWA que captura envíos `POST` sin conexión, los encola en IndexedD
 
 ```
 .
-├── index.html                ← UI (formulario + listas)
-├── app.js                    ← lógica de interfaz, registro de SW, fallback online
-├── db-helper.js              ← mini-wrapper promisificado de IndexedDB
-├── sw.js                     ← Service Worker con evento sync y postMessage
-├── manifest.webmanifest
+├── index.html        ← Interfaz del formulario y bandeja
 ├── styles.css
+├── db-helper.js      ← Mini-wrapper promisificado de IndexedDB
+├── app.js            ← Lógica de UI, envío resiliente y fallback online
+├── sw.js             ← Service Worker con App Shell y Background Sync
+├── manifest.json
 └── icons/
 ```
 
 ## Qué resuelve cada archivo
 
 ### `db-helper.js` (Tema 5.1)
-- Abre la base `outbox-db` (versión 1) con `onupgradeneeded`.
-- Crea el object store `pendientes` con `keyPath: id` y `autoIncrement`.
-- Expone `openDB`, `add`, `getAll`, `getPendientes`, `update`, `remove`, `clearAll`.
-- Cada operación es una `new Promise(...)` que distingue `readonly` de `readwrite`.
+- Base `pwa-outbox-db` versión 1.
+- Object store `transacciones_pendientes` con `keyPath: id` + `autoIncrement`.
+- Funciones: `abrirDB`, `guardarRegistro`, `obtenerTodosLosRegistros`, `eliminarRegistro`, `actualizarEstadoRegistro`.
+- Las escrituras resuelven en `tx.oncomplete` para garantizar persistencia en disco.
+- `actualizarEstadoRegistro` hace `store.get(id)` + `store.put(registro)` dentro de la misma transacción `readwrite`.
 
-### `app.js` + `index.html` (Tema 5.2)
-- El formulario intercepta el submit:
-  - Si hay red, hace `fetch POST` y guarda el registro como `sincronizado`.
-  - Si no hay red o el fetch rechaza, encola el registro como `pendiente`.
-- Renderiza dos listas: pendientes y sincronizados.
-- Botón "Sincronizar ahora" reintenta manualmente con `Promise.all`.
-- Botón "Purgar todo" vacía la base.
+### `index.html` + `app.js` (Tema 5.2)
+- Formulario `#form-incidencia` con `#titulo` y `#descripcion`.
+- `procesarEnvioReporte`: intenta `fetch POST`; si responde OK guarda como `'sincronizado'`, si falla encola como `'pendiente'` y registra la etiqueta de sync.
+- `renderizarColaOutbox` lee IndexedDB y repinta la bandeja.
+- `#btn-purgar` elimina únicamente los registros con `estado === 'sincronizado'` usando `Promise.all`.
 
 ### `sw.js` (Tema 5.3)
-- Cachea el App Shell en `install` y limpia caches viejos en `activate`.
-- Al dispararse el evento `sync` con tag `outbox-sync`, lee los pendientes de IndexedDB y los envía.
-- Comunica el resultado a la página con `postMessage({ type: 'SYNC_RESULT', enviados, fallidos })`.
-- `app.js` registra el sync con `registration.sync.register('outbox-sync')` cuando existe `SyncManager`.
-- **Fallback Safari / iOS:** si no existe `SyncManager`, el evento `online` dispara `sincronizarDesdeUI()`.
+- `importScripts('./db-helper.js')` reutiliza el mismo wrapper en el hilo del SW.
+- Cache `static-outbox-v2` precachea el App Shell (`install`) y limpia versiones viejas (`activate`).
+- `sincronizarPendientesSW` lee pendientes, los envía con `Promise.all` y al terminar llama a `notificarClientesActualizacion`.
+- `notificarClientesActualizacion` usa `self.clients.matchAll` y `postMessage({ tipo: 'OUTBOX_SINCRONIZADO' })`.
+- Evento `sync` con etiqueta `'sync-reportes'` ejecuta el barrido; si falla, se relanza el error para que el navegador programe el reintento automático.
+- `app.js` escucha `message` con `event.data.tipo === 'OUTBOX_SINCRONIZADO'` y repinta.
+- Fallback para Safari/iOS: si `!('SyncManager' in window)`, el evento `online` llama a `sincronizarPendientesFallback()`.
 
 ## Probar en local
-
-Cualquier servidor HTTP estático sirve. Ejemplo:
 
 ```
 python3 -m http.server 8080
 ```
 
-Abrir `http://localhost:8080`.
+Abrir `http://localhost:8080` (no `file://`, el SW requiere HTTP/HTTPS).
 
-## Probar el modo offline
+## Prueba de la pestaña cerrada (Chrome)
 
-1. Abrir la app y aceptar que se registre el Service Worker.
-2. DevTools → Network → marcar **Offline**.
-3. Enviar un mensaje: debe aparecer en la lista "Pendientes".
-4. DevTools → Application → **IndexedDB → outbox-db → pendientes**: el registro está ahí con `status: 'pendiente'`.
-5. Volver a **Online**. Con Background Sync el Service Worker lo reenvía y la UI recibe un toast "Sync en segundo plano: N enviados".
-6. En Safari / iOS el fallback por evento `online` hace el mismo trabajo desde la página.
+1. Abrir la app y verificar en DevTools → Application → Service Workers que `sw.js` está "activated and is running".
+2. DevTools → Application → Background Services → Background Sync → Record.
+3. Network → marcar **Offline**. Enviar dos reportes.
+4. En Background Sync aparece el *Registered sync* con tag `sync-reportes`.
+5. Cerrar la pestaña, desactivar Offline, reabrir la URL.
+6. Los reportes aparecen en estado `sincronizado`.
 
 ## Reglas respetadas
 
 - 100 % JavaScript Vanilla (sin PouchDB, Dexie, idb, Workbox).
 - Toda la asincronía con `new Promise()`, `.then()`, `.catch()`, `Promise.all()`.
-- Rutas relativas (`./`) en HTML, manifest y Service Worker.
+- Rutas relativas (`./`) en HTML, manifest y Service Worker (compatible con subdirectorio de GitHub Pages).

@@ -1,247 +1,198 @@
 const ENDPOINT = 'https://jsonplaceholder.typicode.com/posts'
-const SYNC_TAG = 'outbox-sync'
 
-const form = document.getElementById('form-mensaje')
-const inputNombre = document.getElementById('nombre')
-const inputMensaje = document.getElementById('mensaje')
-const feedback = document.getElementById('feedback')
-const listaPendientes = document.getElementById('lista-pendientes')
-const listaSincronizados = document.getElementById('lista-sincronizados')
-const vacio = document.getElementById('vacio')
-const vacioSinc = document.getElementById('vacio-sinc')
-const estadoRed = document.getElementById('estado-red')
-const estadoSync = document.getElementById('estado-sync')
-const btnSync = document.getElementById('btn-sync')
+const form = document.getElementById('form-incidencia')
+const inputTitulo = document.getElementById('titulo')
+const inputDescripcion = document.getElementById('descripcion')
+const listaOutbox = document.getElementById('lista-outbox')
+const badgeRed = document.getElementById('badge-red')
 const btnPurgar = document.getElementById('btn-purgar')
-const toast = document.getElementById('toast')
 
-function pintarEstadoRed() {
+function actualizarIndicadorRed() {
     if (navigator.onLine) {
-        estadoRed.textContent = 'En línea'
-        estadoRed.className = 'pill pill-ok'
+        badgeRed.textContent = 'En Línea'
+        badgeRed.className = 'badge online'
     } else {
-        estadoRed.textContent = 'Sin conexión'
-        estadoRed.className = 'pill pill-warn'
+        badgeRed.textContent = 'Sin Conexión'
+        badgeRed.className = 'badge offline'
     }
 }
 
-function mostrarToast(texto) {
-    toast.textContent = texto
-    toast.classList.add('visible')
-    setTimeout(() => toast.classList.remove('visible'), 2500)
-}
-
-function renderListas() {
-    DBHelper.getAll()
+function renderizarColaOutbox() {
+    return obtenerTodosLosRegistros()
         .then((registros) => {
-            const pendientes = registros.filter((r) => r.status === 'pendiente')
-            const sincronizados = registros.filter((r) => r.status === 'sincronizado')
+            listaOutbox.innerHTML = ''
 
-            listaPendientes.innerHTML = ''
-            pendientes.forEach((r) => listaPendientes.appendChild(crearItem(r, true)))
-            vacio.style.display = pendientes.length === 0 ? 'block' : 'none'
+            if (registros.length === 0) {
+                const vacio = document.createElement('li')
+                vacio.className = 'item-vacio'
+                vacio.textContent = 'No hay registros en la bandeja.'
+                listaOutbox.appendChild(vacio)
+                return
+            }
 
-            listaSincronizados.innerHTML = ''
-            sincronizados.forEach((r) => listaSincronizados.appendChild(crearItem(r, false)))
-            vacioSinc.style.display = sincronizados.length === 0 ? 'block' : 'none'
+            registros
+                .slice()
+                .sort((a, b) => b.fechaCreacion - a.fechaCreacion)
+                .forEach((registro) => {
+                    listaOutbox.appendChild(crearItemOutbox(registro))
+                })
         })
-        .catch((err) => console.error('Error al leer IndexedDB:', err))
+        .catch((error) => console.error('[Outbox] Error al renderizar:', error))
 }
 
-function crearItem(registro, borrable) {
+function crearItemOutbox(registro) {
     const li = document.createElement('li')
-    li.classList.add('item')
-
-    const info = document.createElement('div')
-    info.classList.add('info')
+    li.className = 'item estado-' + registro.estado
 
     const titulo = document.createElement('strong')
-    titulo.textContent = registro.payload.nombre
+    titulo.textContent = registro.titulo
 
-    const texto = document.createElement('p')
-    texto.textContent = registro.payload.mensaje
+    const descripcion = document.createElement('p')
+    descripcion.textContent = registro.descripcion
 
     const meta = document.createElement('small')
-    meta.textContent = new Date(registro.timestamp).toLocaleString() + ' · ' + registro.status
+    const fecha = new Date(registro.fechaCreacion).toLocaleString()
+    meta.textContent = fecha + ' · estado: ' + registro.estado
 
-    info.appendChild(titulo)
-    info.appendChild(texto)
-    info.appendChild(meta)
-    li.appendChild(info)
+    const chip = document.createElement('span')
+    chip.className = 'chip chip-' + registro.estado
+    chip.textContent = registro.estado
 
-    if (borrable) {
-        const btn = document.createElement('button')
-        btn.textContent = 'Eliminar'
-        btn.classList.add('btn', 'btn-small')
-        btn.addEventListener('click', () => {
-            DBHelper.remove(registro.id)
-                .then(() => {
-                    renderListas()
-                    mostrarToast('Registro eliminado')
-                })
-                .catch((err) => console.error(err))
-        })
-        li.appendChild(btn)
-    }
+    li.appendChild(chip)
+    li.appendChild(titulo)
+    li.appendChild(descripcion)
+    li.appendChild(meta)
 
     return li
 }
 
-function solicitarBackgroundSync() {
-    if (!('serviceWorker' in navigator) || !('SyncManager' in window)) {
-        return Promise.resolve(false)
-    }
-    return navigator.serviceWorker.ready.then((registration) => {
-        return registration.sync.register(SYNC_TAG).then(() => true)
-    })
-}
-
-function enviarAlServidor(registro) {
+function procesarEnvioReporte(datosFormulario) {
     return fetch(ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(registro.payload)
-    }).then((resp) => {
-        if (!resp.ok) {
-            throw new Error('Respuesta no OK: ' + resp.status)
-        }
-        return resp.json()
+        body: JSON.stringify(datosFormulario)
     })
+        .then((respuesta) => {
+            if (!respuesta.ok) throw new Error('Error HTTP del servidor')
+            return respuesta.json()
+        })
+        .then(() => {
+            return guardarRegistro({
+                ...datosFormulario,
+                estado: 'sincronizado',
+                fechaCreacion: Date.now()
+            })
+        })
+        .catch(() => {
+            console.warn('[Outbox] Sin conexión. Encolando en IndexedDB...')
+
+            return guardarRegistro({
+                ...datosFormulario,
+                estado: 'pendiente',
+                fechaCreacion: Date.now()
+            })
+                .then(() => {
+                    if ('serviceWorker' in navigator && 'SyncManager' in window) {
+                        return navigator.serviceWorker.ready
+                            .then((registro) => {
+                                console.log('[Outbox] Registrando etiqueta sync-reportes en el SW...')
+                                return registro.sync.register('sync-reportes')
+                            })
+                    }
+                })
+        })
+        .then(() => {
+            return renderizarColaOutbox()
+        })
 }
 
-function sincronizarDesdeUI() {
-    estadoSync.textContent = 'Sync: en curso'
-    estadoSync.className = 'pill pill-info'
+function sincronizarPendientesFallback() {
+    console.log('[Outbox] Conexión detectada. Buscando registros pendientes...')
 
-    return DBHelper.getPendientes().then((pendientes) => {
-        if (pendientes.length === 0) {
-            estadoSync.textContent = 'Sync: nada que enviar'
-            return { enviados: 0, fallidos: 0 }
-        }
+    return obtenerTodosLosRegistros()
+        .then((registros) => {
+            const pendientes = registros.filter((item) => item.estado === 'pendiente')
 
-        const tareas = pendientes.map((registro) => {
-            return enviarAlServidor(registro)
-                .then(() => {
-                    registro.status = 'sincronizado'
-                    registro.syncedAt = Date.now()
-                    return DBHelper.update(registro).then(() => ({ ok: true }))
+            if (pendientes.length === 0) {
+                console.log('[Outbox] No hay transacciones pendientes por sincronizar.')
+                return
+            }
+
+            const promesasDeEnvio = pendientes.map((item) => {
+                return fetch(ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: item.titulo, body: item.descripcion })
                 })
-                .catch((err) => {
-                    console.warn('Falló envío del registro', registro.id, err)
-                    return { ok: false }
-                })
-        })
+                    .then((res) => {
+                        if (!res.ok) throw new Error('Falla al reintentar envío')
+                        return actualizarEstadoRegistro(item.id, 'sincronizado')
+                    })
+            })
 
-        return Promise.all(tareas).then((resultados) => {
-            const enviados = resultados.filter((r) => r.ok).length
-            const fallidos = resultados.length - enviados
-            estadoSync.textContent = 'Sync: ' + enviados + ' enviados, ' + fallidos + ' pendientes'
-            estadoSync.className = fallidos === 0 ? 'pill pill-ok' : 'pill pill-warn'
-            renderListas()
-            mostrarToast('Sincronización: ' + enviados + ' enviados')
-            return { enviados: enviados, fallidos: fallidos }
+            return Promise.all(promesasDeEnvio)
         })
-    })
+        .then(() => renderizarColaOutbox())
+        .catch((error) => {
+            console.error('[Outbox] Error durante la sincronización masiva:', error)
+        })
 }
 
 form.addEventListener('submit', (event) => {
     event.preventDefault()
 
-    const payload = {
-        nombre: inputNombre.value.trim(),
-        mensaje: inputMensaje.value.trim()
+    const datosFormulario = {
+        titulo: inputTitulo.value.trim(),
+        descripcion: inputDescripcion.value.trim()
     }
 
-    if (!payload.nombre || !payload.mensaje) return
+    if (!datosFormulario.titulo || !datosFormulario.descripcion) return
 
-    if (!navigator.onLine) {
-        DBHelper.add(payload)
-            .then(() => {
-                feedback.textContent = 'Sin conexión: guardado en la cola.'
-                form.reset()
-                renderListas()
-                return solicitarBackgroundSync()
-            })
-            .then((registrado) => {
-                if (registrado) {
-                    estadoSync.textContent = 'Sync: programado en segundo plano'
-                    estadoSync.className = 'pill pill-info'
-                }
-            })
-            .catch((err) => console.error(err))
-        return
-    }
-
-    enviarAlServidor({ payload: payload })
-        .then(() => {
-            feedback.textContent = 'Enviado directo al servidor.'
-            form.reset()
-            const sincronizado = {
-                payload: payload,
-                status: 'sincronizado',
-                timestamp: Date.now(),
-                syncedAt: Date.now()
-            }
-            return DBHelper.openDB().then((db) => {
-                return new Promise((resolve, reject) => {
-                    const tx = db.transaction(DBHelper.STORE_NAME, 'readwrite')
-                    const req = tx.objectStore(DBHelper.STORE_NAME).add(sincronizado)
-                    req.onsuccess = () => resolve()
-                    req.onerror = (e) => reject(e.target.error)
-                })
-            })
-        })
-        .then(() => renderListas())
-        .catch(() => {
-            DBHelper.add(payload)
-                .then(() => {
-                    feedback.textContent = 'Fallo de red: guardado en la cola.'
-                    form.reset()
-                    renderListas()
-                    return solicitarBackgroundSync()
-                })
-                .catch((err) => console.error(err))
-        })
-})
-
-btnSync.addEventListener('click', () => {
-    sincronizarDesdeUI().catch((err) => console.error(err))
+    procesarEnvioReporte(datosFormulario)
+        .then(() => form.reset())
+        .catch((error) => console.error('[Outbox] Fallo en procesarEnvioReporte:', error))
 })
 
 btnPurgar.addEventListener('click', () => {
-    DBHelper.clearAll()
-        .then(() => {
-            renderListas()
-            mostrarToast('Cola purgada')
+    obtenerTodosLosRegistros()
+        .then((registros) => {
+            const sincronizados = registros.filter((item) => item.estado === 'sincronizado')
+
+            if (sincronizados.length === 0) {
+                console.log('[Outbox] No hay registros sincronizados que purgar.')
+                return
+            }
+
+            const promesasDeBorrado = sincronizados.map((item) => eliminarRegistro(item.id))
+            return Promise.all(promesasDeBorrado)
         })
-        .catch((err) => console.error(err))
+        .then(() => renderizarColaOutbox())
+        .catch((error) => console.error('[Outbox] Error al purgar:', error))
 })
 
 window.addEventListener('online', () => {
-    pintarEstadoRed()
+    actualizarIndicadorRed()
+
     if (!('SyncManager' in window)) {
-        mostrarToast('Conexión recuperada: sincronizando...')
-        sincronizarDesdeUI().catch((err) => console.error(err))
+        console.log('[Outbox] Navegador sin SyncManager. Ejecutando fallback por evento online...')
+        sincronizarPendientesFallback()
     }
 })
 
-window.addEventListener('offline', pintarEstadoRed)
+window.addEventListener('offline', actualizarIndicadorRed)
 
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js')
-        .then(() => console.log('SW registrado'))
-        .catch((err) => console.error('Error registrando SW:', err))
+        .then(() => console.log('[UI] Service Worker registrado'))
+        .catch((error) => console.error('[UI] Error registrando SW:', error))
 
     navigator.serviceWorker.addEventListener('message', (event) => {
-        const data = event.data || {}
-        if (data.type === 'SYNC_RESULT') {
-            estadoSync.textContent = 'Sync SW: ' + data.enviados + ' enviados, ' + data.fallidos + ' pendientes'
-            estadoSync.className = data.fallidos === 0 ? 'pill pill-ok' : 'pill pill-warn'
-            renderListas()
-            mostrarToast('Sync en segundo plano: ' + data.enviados + ' enviados')
+        if (event.data && event.data.tipo === 'OUTBOX_SINCRONIZADO') {
+            console.log('[UI] Confirmación recibida del Service Worker. Actualizando bandeja...')
+            renderizarColaOutbox()
         }
     })
 }
 
-pintarEstadoRed()
-renderListas()
+actualizarIndicadorRed()
+renderizarColaOutbox()

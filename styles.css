@@ -7,7 +7,7 @@ body {
     color: #1f2d3d;
 }
 
-.topbar {
+header {
     background: #0d6efd;
     color: #fff;
     padding: 1rem 1.5rem;
@@ -18,31 +18,23 @@ body {
     gap: 0.75rem;
 }
 
-.topbar h1 {
+header h1 {
     margin: 0;
     font-size: 1.25rem;
 }
 
-.estado {
-    display: flex;
-    gap: 0.5rem;
-}
-
-.pill {
+.badge {
     display: inline-block;
     padding: 0.25rem 0.75rem;
     border-radius: 999px;
-    background: #e5e7eb;
-    color: #1f2d3d;
     font-size: 0.8rem;
     font-weight: 600;
 }
 
-.pill-ok { background: #d1fae5; color: #065f46; }
-.pill-warn { background: #fee2e2; color: #991b1b; }
-.pill-info { background: #dbeafe; color: #1e40af; }
+.badge.online { background: #d1fae5; color: #065f46; }
+.badge.offline { background: #fee2e2; color: #991b1b; }
 
-.container {
+main {
     max-width: 720px;
     margin: 1.5rem auto;
     padding: 0 1rem;
@@ -62,54 +54,39 @@ body {
     font-size: 1.05rem;
 }
 
-form label {
-    display: block;
-    margin-bottom: 0.75rem;
-    font-size: 0.85rem;
-    font-weight: 600;
+#form-incidencia {
+    display: grid;
+    gap: 0.75rem;
 }
 
-form input,
-form textarea {
+#form-incidencia input,
+#form-incidencia textarea {
     width: 100%;
     padding: 0.6rem;
     border: 1px solid #cbd5e1;
     border-radius: 8px;
     font-size: 0.95rem;
     font-family: inherit;
-    margin-top: 0.25rem;
 }
 
-form textarea {
-    min-height: 80px;
+#form-incidencia textarea {
+    min-height: 90px;
     resize: vertical;
 }
 
-.btn {
+#form-incidencia button {
     cursor: pointer;
     border: none;
-    padding: 0.55rem 1rem;
+    padding: 0.6rem 1rem;
     border-radius: 8px;
-    background: #e2e8f0;
-    color: #1f2d3d;
+    background: #0d6efd;
+    color: #fff;
     font-weight: 600;
     font-size: 0.9rem;
+    justify-self: start;
 }
 
-.btn:hover { filter: brightness(0.95); }
-
-.btn-primary { background: #0d6efd; color: #fff; }
-.btn-danger { background: #dc3545; color: #fff; }
-.btn-small { padding: 0.35rem 0.7rem; font-size: 0.8rem; }
-
-.feedback {
-    margin-top: 0.5rem;
-    font-size: 0.85rem;
-    color: #065f46;
-    min-height: 1.1rem;
-}
-
-.row-between {
+.header-lista {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -118,12 +95,18 @@ form textarea {
     margin-bottom: 0.75rem;
 }
 
-.acciones {
-    display: flex;
-    gap: 0.5rem;
+#btn-purgar {
+    cursor: pointer;
+    border: none;
+    padding: 0.5rem 0.9rem;
+    border-radius: 8px;
+    background: #dc3545;
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.85rem;
 }
 
-.lista {
+#lista-outbox {
     list-style: none;
     padding: 0;
     margin: 0;
@@ -132,49 +115,40 @@ form textarea {
 }
 
 .item {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 0.75rem;
-    padding: 0.75rem;
+    position: relative;
+    padding: 0.75rem 0.75rem 0.75rem 0.75rem;
     background: #f8fafc;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
+    display: grid;
+    gap: 0.25rem;
 }
 
-.item .info {
-    display: grid;
-    gap: 0.15rem;
-    flex: 1;
-}
+.item.estado-pendiente { border-left: 4px solid #f59e0b; }
+.item.estado-sincronizado { border-left: 4px solid #10b981; }
 
 .item strong { font-size: 0.95rem; }
 .item p { margin: 0; font-size: 0.9rem; }
 .item small { color: #64748b; font-size: 0.75rem; }
 
-.muted {
+.chip {
+    display: inline-block;
+    align-self: flex-start;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.15rem;
+}
+
+.chip-pendiente { background: #fef3c7; color: #92400e; }
+.chip-sincronizado { background: #d1fae5; color: #065f46; }
+
+.item-vacio {
     color: #64748b;
     font-size: 0.85rem;
-    margin: 0.5rem 0 0;
-}
-
-.toast {
-    position: fixed;
-    bottom: 1rem;
-    left: 50%;
-    transform: translateX(-50%) translateY(2rem);
-    background: #1f2d3d;
-    color: #fff;
-    padding: 0.6rem 1rem;
-    border-radius: 999px;
-    font-size: 0.85rem;
-    opacity: 0;
-    transition: opacity 0.2s, transform 0.2s;
-    pointer-events: none;
-    z-index: 999;
-}
-
-.toast.visible {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    padding: 0.5rem 0;
+    list-style: none;
 }

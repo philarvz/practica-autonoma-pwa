@@ -1,28 +1,24 @@
 importScripts('./db-helper.js')
 
-const ENDPOINT = 'https://jsonplaceholder.typicode.com/posts'
-const SYNC_TAG = 'outbox-sync'
-const CACHE_SHELL = 'outbox-shell-v1'
-
-const APP_SHELL = [
+const CACHE_STATIC_NAME = 'static-outbox-v2'
+const STATIC_FILES = [
     './',
     './index.html',
     './styles.css',
-    './app.js',
     './db-helper.js',
-    './manifest.webmanifest',
-    './icons/icon-192.png',
-    './icons/icon-512.png'
+    './app.js',
+    './manifest.json'
 ]
 
 self.addEventListener('install', (event) => {
+    console.log('[SW] Instalando y precacheando App Shell...')
     self.skipWaiting()
     event.waitUntil(
-        caches.open(CACHE_SHELL).then((cache) => {
+        caches.open(CACHE_STATIC_NAME).then((cache) => {
             return Promise.all(
-                APP_SHELL.map((url) => {
+                STATIC_FILES.map((url) => {
                     return cache.add(url).catch((err) => {
-                        console.warn('No se pudo cachear', url, err)
+                        console.warn('[SW] No se pudo cachear', url, err)
                     })
                 })
             )
@@ -31,11 +27,12 @@ self.addEventListener('install', (event) => {
 })
 
 self.addEventListener('activate', (event) => {
+    console.log('[SW] Activando y limpiando caches antiguos...')
     event.waitUntil(
         caches.keys()
             .then((keys) => {
                 return Promise.all(
-                    keys.filter((k) => k !== CACHE_SHELL).map((k) => caches.delete(k))
+                    keys.filter((k) => k !== CACHE_STATIC_NAME).map((k) => caches.delete(k))
                 )
             })
             .then(() => self.clients.claim())
@@ -44,82 +41,70 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return
+
     event.respondWith(
-        caches.match(event.request).then((hit) => {
-            return hit || fetch(event.request).catch(() => hit)
+        caches.match(event.request).then((cacheado) => {
+            return cacheado || fetch(event.request).catch(() => cacheado)
         })
     )
 })
 
-function enviarRegistro(registro) {
-    return fetch(ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(registro.payload)
-    }).then((resp) => {
-        if (!resp.ok) throw new Error('Respuesta no OK: ' + resp.status)
-        return resp.json()
-    })
-}
-
-function procesarCola() {
-    return self.DBHelper.getPendientes().then((pendientes) => {
-        if (pendientes.length === 0) {
-            return { enviados: 0, fallidos: 0 }
-        }
-
-        const tareas = pendientes.map((registro) => {
-            return enviarRegistro(registro)
-                .then(() => {
-                    registro.status = 'sincronizado'
-                    registro.syncedAt = Date.now()
-                    return self.DBHelper.update(registro).then(() => ({ ok: true }))
+function notificarClientesActualizacion() {
+    return self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        .then((clientes) => {
+            clientes.forEach((cliente) => {
+                cliente.postMessage({
+                    tipo: 'OUTBOX_SINCRONIZADO',
+                    timestamp: Date.now()
                 })
-                .catch((err) => {
-                    console.warn('[SW] fallo envío', registro.id, err)
-                    return { ok: false }
-                })
-        })
-
-        return Promise.all(tareas).then((resultados) => {
-            const enviados = resultados.filter((r) => r.ok).length
-            const fallidos = resultados.length - enviados
-            return { enviados: enviados, fallidos: fallidos }
-        })
-    })
-}
-
-function avisarClientes(resultado) {
-    return self.clients.matchAll({ includeUncontrolled: true }).then((clientes) => {
-        clientes.forEach((cliente) => {
-            cliente.postMessage({
-                type: 'SYNC_RESULT',
-                enviados: resultado.enviados,
-                fallidos: resultado.fallidos,
-                timestamp: Date.now()
             })
         })
-        return resultado
-    })
+}
+
+function sincronizarPendientesSW() {
+    console.log('[SW-Sync] Ejecutando barrido de transacciones pendientes...')
+
+    return obtenerTodosLosRegistros()
+        .then((registros) => {
+            const pendientes = registros.filter((item) => item.estado === 'pendiente')
+
+            if (pendientes.length === 0) {
+                console.log('[SW-Sync] Cola limpia. Nada por sincronizar.')
+                return
+            }
+
+            const promesasDeEnvio = pendientes.map((item) => {
+                return fetch('https://jsonplaceholder.typicode.com/posts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: item.titulo,
+                        body: item.descripcion
+                    })
+                })
+                    .then((respuesta) => {
+                        if (!respuesta.ok) {
+                            throw new Error(`Error HTTP ${respuesta.status} al sincronizar ID ${item.id}`)
+                        }
+                        return actualizarEstadoRegistro(item.id, 'sincronizado')
+                    })
+            })
+
+            return Promise.all(promesasDeEnvio)
+                .then(() => notificarClientesActualizacion())
+        })
 }
 
 self.addEventListener('sync', (event) => {
-    if (event.tag !== SYNC_TAG) return
-    event.waitUntil(
-        procesarCola()
-            .then((resultado) => avisarClientes(resultado))
-            .catch((err) => {
-                console.error('[SW] error en sync:', err)
-                return avisarClientes({ enviados: 0, fallidos: -1 })
-            })
-    )
-})
+    console.log('[SW-Sync] Evento sync disparado con etiqueta:', event.tag)
 
-self.addEventListener('message', (event) => {
-    const data = event.data || {}
-    if (data.type === 'FORCE_SYNC') {
+    if (event.tag === 'sync-reportes') {
         event.waitUntil(
-            procesarCola().then((resultado) => avisarClientes(resultado))
+            sincronizarPendientesSW()
+                .catch((error) => {
+                    console.error('[SW-Sync] Falla en sincronización; el navegador reintentará luego:', error)
+                    throw error
+                })
         )
     }
 })
